@@ -11,13 +11,17 @@ a workflow file here.
 
 | Tier | Where | Changes when |
 |---|---|---|
-| Mechanism | **here** (public) | the CI plumbing changes — needs the `v1` tag moved |
+| Mechanism | **here** (public) | the CI plumbing changes — repin or move the tag |
 | Judgment | `care-ecosystem/care_reviewer` (private) | a review rule changes — takes effect immediately, fleet-wide |
 | Local context | each plugin repo's `CLAUDE.md` | that plugin's shape changes |
 
 This repo is public because GitHub only lets a *private* repo's reusable workflows be called by
 other *private* repos in the same org, and most CARE plugin repos are public. It contains no
 secrets.
+
+> **Status: pilot.** Everything is on `dev` and callers reference `@dev`, so changes land
+> immediately and nothing is pinned yet. The plugin repos are deliberately untouched. Merge to
+> `main`, tag `v1`, and repin the callers once the rules are tuned.
 
 ## Onboarding a repo
 

@@ -23,7 +23,10 @@ concurrency:
 jobs:
   review:
     if: github.event.pull_request.draft == false && github.event.pull_request.user.type != 'Bot'
-    uses: care-ecosystem/care_ci/.github/workflows/plugin-review.yml@v1
+    # Pinned to @dev while the reviewer is being tuned: a rule or workflow change takes
+    # effect immediately, with no tag to move. Repin to @v1 once this is merged to main
+    # and tagged, so a workflow change becomes a deliberate rollout rather than a surprise.
+    uses: care-ecosystem/care_ci/.github/workflows/plugin-review.yml@dev
     with:
       layer: backend        # or: frontend
     secrets: inherit
