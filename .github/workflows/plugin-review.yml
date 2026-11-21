@@ -1,0 +1,122 @@
+name: CARE Plugin Review
+
+# Reusable reviewer for the CARE plugin fleet.
+#
+# Mechanism lives here (public, so public callers can reference it); judgment lives in the
+# private care-ecosystem/care_reviewer, checked out at run time. A rule change is a commit
+# there and needs no tag move here.
+#
+# Advisory by design: this workflow must never block a merge. See `continue-on-error` below.
+
+on:
+  workflow_call:
+    inputs:
+      layer:
+        description: 'Which rule set to load: "backend" or "frontend".'
+        required: true
+        type: string
+      max_diff_lines:
+        description: 'Skip the review above this many changed lines.'
+        required: false
+        type: number
+        default: 2000
+      model:
+        required: false
+        type: string
+        default: claude-sonnet-5
+    secrets:
+      ANTHROPIC_API_KEY:
+        required: true
+      CARE_REVIEWER_TOKEN:
+        required: true
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      pull-requests: read
+      issues: read
+      id-token: write        # required for the action's default GitHub App authentication
+    steps:
+      - name: Validate layer input
+        run: |
+          case "${{ inputs.layer }}" in
+            backend|frontend) ;;
+            *) echo "::error::layer must be 'backend' or 'frontend', got '${{ inputs.layer }}'"; exit 1 ;;
+          esac
+
+      # Full history: the size gate and the review both diff base...head locally, so we never
+      # need a GitHub API call (or a token) just to read the diff.
+      - name: Check out the plugin repo
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Check out the review rules
+        uses: actions/checkout@v6
+        with:
+          repository: care-ecosystem/care_reviewer
+          path: .care-rules
+          token: ${{ secrets.CARE_REVIEWER_TOKEN }}
+          persist-credentials: false
+
+      - name: Size gate
+        id: size
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          MAX: ${{ inputs.max_diff_lines }}
+        run: |
+          CHANGED=$(git diff --numstat "$BASE_SHA...$HEAD_SHA" \
+            | awk '{ a += ($1 == "-" ? 0 : $1); d += ($2 == "-" ? 0 : $2) } END { print a + d + 0 }')
+          echo "changed=$CHANGED" >> "$GITHUB_OUTPUT"
+          if [ "$CHANGED" -gt "$MAX" ]; then
+            echo "too_big=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::Skipping review: $CHANGED changed lines exceeds the limit of $MAX."
+          else
+            echo "too_big=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Reviewing $CHANGED changed lines."
+          fi
+
+      - name: Review
+        if: steps.size.outputs.too_big != 'true'
+        # Advisory: a failed or errored review must never turn the PR's checks red.
+        continue-on-error: true
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          use_sticky_comment: true
+          claude_args: >-
+            --model ${{ inputs.model }}
+            --max-turns 15
+            --allowedTools "Read,Glob,Grep,Bash(git diff:*),Bash(git log:*),Bash(git show:*),mcp__github_inline_comment__create_inline_comment"
+          prompt: |
+            Review pull request #${{ github.event.pull_request.number }} in
+            ${{ github.repository }}.
+
+            Read these three files first, in this order, and follow them exactly:
+
+            1. `.care-rules/rules/REVIEW.md` — the review contract: lenses, severity tiers,
+               the NEVER-rules, and the required output format.
+            2. `.care-rules/rules/${{ inputs.layer }}-plugin.md` — the rules for this layer.
+            3. `CLAUDE.md` in the repository root, if present — this plugin's identity, entry
+               points, integrations and deliberate deviations. A deviation documented there is
+               not a finding. If it is missing, say so once in the summary and review anyway.
+
+            The diff under review is:
+
+                git diff ${{ github.event.pull_request.base.sha }}...${{ github.event.pull_request.head.sha }}
+
+            The working tree is the PR's head, so you can read any file at its post-change state
+            and check other callers of anything this diff touches. Verify every claim against the
+            actual tree before making it.
+
+            Post each finding as an inline comment on its specific line, plus one summary comment,
+            exactly as REVIEW.md specifies. Remember proportionality: if the diff is fine, say so
+            and post nothing inline.
+
+      - name: Note skipped review
+        if: steps.size.outputs.too_big == 'true'
+        run: echo "Review skipped (${{ steps.size.outputs.changed }} changed lines). Job is green by design."

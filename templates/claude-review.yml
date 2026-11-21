@@ -1,0 +1,29 @@
+# Copy to .github/workflows/claude-review.yml in a plugin repo.
+# Set `layer:` to backend or frontend. Nothing else needs changing.
+
+name: Claude Review
+
+on:
+  pull_request:
+    types: [opened, ready_for_review, synchronize, reopened]
+    paths-ignore:
+      - '**/*.lock'
+      - '**/package-lock.json'
+      - '**/Pipfile.lock'
+      - '**/poetry.lock'
+      - '**/uv.lock'
+      # Do NOT add migrations here. Migration hygiene is one of the rules with the
+      # highest hit rate, and this fleet has already had a migration regenerated
+      # under an existing filename — which Django silently ignores.
+
+concurrency:
+  group: claude-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    if: github.event.pull_request.draft == false && github.event.pull_request.user.type != 'Bot'
+    uses: care-ecosystem/care_ci/.github/workflows/plugin-review.yml@v1
+    with:
+      layer: backend        # or: frontend
+    secrets: inherit
