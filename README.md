@@ -55,12 +55,18 @@ secrets.
 
 ## Releases
 
-Work lands on `dev`. Merging `dev` into `main` with a bumped `VERSION` cuts a release — the
-version comes from the `VERSION` file, so the tag can never disagree with the tree.
+Work lands on `dev`, and for now releases are cut from `dev` too — bump `VERSION`, push, and
+the tag appears. The version comes from the `VERSION` file, so the tag can never disagree with
+the tree.
 
 ```
-dev  ──(PR)──▶  main  ──(VERSION changed)──▶  v0.0.1-beta.1  +  beta
+dev  ──(VERSION bumped)──▶  v0.0.1-beta.1  +  beta
 ```
+
+Releasing off `dev` is deliberate at this stage: there is no stable branch to protect yet, and
+requiring a merge to `main` for every beta would add a step that buys nothing. Point
+`release.yml` at `main` once the reviewer stabilises — the same moment the version drops its
+`-beta` suffix and callers repin from `beta` to `v1`.
 
 Two tags come out:
 

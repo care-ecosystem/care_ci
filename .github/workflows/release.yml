@@ -1,7 +1,12 @@
 name: Release
 
-# Push to main cuts a release. The version comes from the VERSION file, so releasing is a
+# Push to dev cuts a release. The version comes from the VERSION file, so releasing is a
 # one-line commit and the tag can never disagree with what is in the tree.
+#
+# Releasing from `dev` is a pilot-stage choice: there is no stable branch to protect yet, and
+# requiring a merge to main for every beta would add a step that buys nothing. Switch
+# `branches:` to [main] once the reviewer stabilises — that is the same moment the version
+# loses its `-beta` suffix and callers repin from `beta` to a `v1` alias.
 #
 # Two tags are produced:
 #   v<VERSION>  immutable, e.g. v0.0.1-beta.1 — what a caller pins to for a reproducible run
@@ -13,7 +18,7 @@ name: Release
 
 on:
   push:
-    branches: [main]
+    branches: [dev]
     paths: ['VERSION']
   workflow_dispatch:
 
