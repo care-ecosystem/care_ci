@@ -1,0 +1,64 @@
+name: Release
+
+# Push to main cuts a release. The version comes from the VERSION file, so releasing is a
+# one-line commit and the tag can never disagree with what is in the tree.
+#
+# Two tags are produced:
+#   v<VERSION>  immutable, e.g. v0.0.1-beta.1 — what a caller pins to for a reproducible run
+#   beta        moving, points at the newest prerelease — what the fleet follows during the pilot
+#
+# Anything with a hyphen in VERSION (0.0.1-beta.1) is marked a GitHub prerelease. Drop the
+# hyphen (0.1.0) and it becomes a normal release, and `beta` stops moving — which is the
+# natural moment to introduce a moving `v0`/`v1` alias and repin callers to it.
+
+on:
+  push:
+    branches: [main]
+    paths: ['VERSION']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Read and validate VERSION
+        id: v
+        run: |
+          VERSION=$(tr -d '[:space:]' < VERSION)
+          if ! printf '%s' "$VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$'; then
+            echo "::error::VERSION must be semver, got '$VERSION'"; exit 1
+          fi
+          if git rev-parse -q --verify "refs/tags/v$VERSION" >/dev/null; then
+            echo "::error::Tag v$VERSION already exists. Bump VERSION to cut a new release."; exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          case "$VERSION" in *-*) echo "prerelease=true" ;; *) echo "prerelease=false" ;; esac >> "$GITHUB_OUTPUT"
+
+      - name: Tag and release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.v.outputs.version }}
+          PRERELEASE: ${{ steps.v.outputs.prerelease }}
+        run: |
+          git config user.name  'github-actions[bot]'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
+          git tag -a "v$VERSION" -m "care_ci v$VERSION"
+          git push origin "v$VERSION"
+
+          if [ "$PRERELEASE" = "true" ]; then
+            git tag -f beta "v$VERSION"
+            git push -f origin beta
+          fi
+
+          FLAG=""
+          [ "$PRERELEASE" = "true" ] && FLAG="--prerelease"
+          gh release create "v$VERSION" $FLAG \
+            --title "care_ci v$VERSION" \
+            --generate-notes

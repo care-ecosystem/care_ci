@@ -11,7 +11,7 @@ a workflow file here.
 
 | Tier | Where | Changes when |
 |---|---|---|
-| Mechanism | **here** (public) | the CI plumbing changes — repin or move the tag |
+| Mechanism | **here** (public) | the CI plumbing changes — cut a release (below) |
 | Judgment | `care-ecosystem/care_reviewer` (private) | a review rule changes — takes effect immediately, fleet-wide |
 | Local context | each plugin repo's `CLAUDE.md` | that plugin's shape changes |
 
@@ -19,9 +19,8 @@ This repo is public because GitHub only lets a *private* repo's reusable workflo
 other *private* repos in the same org, and most CARE plugin repos are public. It contains no
 secrets.
 
-> **Status: pilot.** Everything is on `dev` and callers reference `@dev`, so changes land
-> immediately and nothing is pinned yet. The plugin repos are deliberately untouched. Merge to
-> `main`, tag `v1`, and repin the callers once the rules are tuned.
+> **Status: pilot, `0.0.1-beta.1`.** Callers reference `@dev`, so changes land immediately and
+> nothing is pinned yet. The plugin repos are deliberately untouched.
 
 ## Onboarding a repo
 
@@ -54,6 +53,41 @@ secrets.
 - `CARE_REVIEWER_TOKEN` — a fine-grained PAT with `Contents: Read` on `care_reviewer` and
   nothing else. It expires; an expired token turns every review run red.
 
+## Releases
+
+Work lands on `dev`. Merging `dev` into `main` with a bumped `VERSION` cuts a release — the
+version comes from the `VERSION` file, so the tag can never disagree with the tree.
+
+```
+dev  ──(PR)──▶  main  ──(VERSION changed)──▶  v0.0.1-beta.1  +  beta
+```
+
+Two tags come out:
+
+| Tag | |
+|---|---|
+| `v<VERSION>` | immutable — pin here for a reproducible run |
+| `beta` | moving, points at the newest prerelease — what the fleet follows during the pilot |
+
+A hyphen in `VERSION` (`0.0.1-beta.1`) marks it a GitHub prerelease. Dropping the hyphen
+(`0.1.0`) makes it a normal release and `beta` stops moving — that is the natural moment to add
+a moving `v0`/`v1` alias and repin callers to it.
+
+Re-running the release on an existing version fails rather than overwriting the tag: bump
+`VERSION` to release.
+
+### Which ref should callers use?
+
+| Stage | `uses: ...@` | Why |
+|---|---|---|
+| Now (pilot) | `dev` | tuning the rules; no release step per change |
+| Once betas are cut | `beta` | one moving ref the fleet follows, releases are deliberate |
+| Stable | `v1` | a workflow change becomes an explicit rollout |
+
+Note the rules are a separate axis: `rules_ref` selects which ref of `care_reviewer` supplies
+them, defaulting to `dev` while `care_reviewer`'s `main` is still empty. Rules deliberately are
+not version-pinned — a rule fix should reach the fleet without a release.
+
 ## Inputs
 
 | Input | Default | |
@@ -61,6 +95,7 @@ secrets.
 | `layer` | *(required)* | `backend` or `frontend` — selects the rule file |
 | `max_diff_lines` | `2000` | skip above this many changed lines |
 | `model` | `claude-sonnet-5` | |
+| `rules_ref` | `dev` | which ref of `care_reviewer` supplies the rules |
 
 ## Cost
 

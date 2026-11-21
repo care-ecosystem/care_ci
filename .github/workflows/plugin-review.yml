@@ -24,6 +24,14 @@ on:
         required: false
         type: string
         default: claude-sonnet-5
+      rules_ref:
+        description: >-
+          Which ref of care_reviewer to take the rules from. Defaults to `dev` during the
+          pilot, because that is where the rules currently live; care_reviewer's own default
+          branch is still empty. Flip this default to `main` once the rules are merged there.
+        required: false
+        type: string
+        default: dev
     secrets:
       ANTHROPIC_API_KEY:
         required: true
@@ -58,9 +66,27 @@ jobs:
         uses: actions/checkout@v6
         with:
           repository: care-ecosystem/care_reviewer
+          ref: ${{ inputs.rules_ref }}
           path: .care-rules
           token: ${{ secrets.CARE_REVIEWER_TOKEN }}
           persist-credentials: false
+
+      # A misconfigured reviewer must still not block a merge, so this annotates loudly and
+      # skips the review rather than failing the job. A silent no-op would be worse than both.
+      - name: Verify the rules are present
+        id: rules
+        run: |
+          MISSING=
+          for f in rules/REVIEW.md "rules/${{ inputs.layer }}-plugin.md"; do
+            [ -s ".care-rules/$f" ] || MISSING="$MISSING $f"
+          done
+          if [ -n "$MISSING" ]; then
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+            echo "::error::No review possible: missing or empty on care_reviewer@${{ inputs.rules_ref }}:$MISSING"
+          else
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::Rules loaded from care_reviewer@${{ inputs.rules_ref }}."
+          fi
 
       - name: Size gate
         id: size
@@ -81,7 +107,7 @@ jobs:
           fi
 
       - name: Review
-        if: steps.size.outputs.too_big != 'true'
+        if: steps.rules.outputs.ok == 'true' && steps.size.outputs.too_big != 'true'
         # Advisory: a failed or errored review must never turn the PR's checks red.
         continue-on-error: true
         uses: anthropics/claude-code-action@v1
