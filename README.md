@@ -47,9 +47,15 @@ secrets.
 - The [Claude GitHub App](https://github.com/apps/claude) installed on `care-ecosystem`. The
   action authenticates its comment writes as this App, which is why the workflow needs only
   `pull-requests: read`.
-- `ANTHROPIC_API_KEY` — an Anthropic Console API key, as an org Actions secret. An API key
-  rather than an OAuth token because the secret is shared across repositories and an OAuth token
-  is tied to one person's subscription.
+- `CLAUDE_CODE_OAUTH_TOKEN` — generated with `claude setup-token`, as an org Actions secret.
+  Works on Pro, Max, Ultra, Team and Enterprise.
+
+  Know what this means before relying on it: the token is tied to the **subscription of whoever
+  ran the command**. Reviews draw on that person's rate limits, so a busy review day throttles
+  their own Claude Code; the token dies if they leave or their seat changes; and Anthropic's
+  docs recommend a Console API key instead for a secret shared across repositories. Fine for a
+  pilot, worth revisiting before the full fleet. Swapping to an API key later is a two-line
+  change: `anthropic_api_key` in place of `claude_code_oauth_token`.
 - `CARE_REVIEWER_TOKEN` — a fine-grained PAT with `Contents: Read` on `care_reviewer` and
   nothing else. It expires; an expired token turns every review run red.
 
@@ -100,12 +106,39 @@ not version-pinned — a rule fix should reach the fleet without a release.
 |---|---|---|
 | `layer` | *(required)* | `backend` or `frontend` — selects the rule file |
 | `max_diff_lines` | `2000` | skip above this many changed lines |
-| `model` | `claude-sonnet-5` | |
+| `model` | org variable, else `claude-haiku-4-5` | see below |
 | `rules_ref` | `dev` | which ref of `care_reviewer` supplies the rules |
+
+### Changing the model
+
+Resolution order: the caller's `model:` input, then the org variable `CARE_REVIEW_MODEL`, then
+`claude-haiku-4-5`.
+
+Set the **org variable** (a variable, not a secret — the model name isn't sensitive) to move the
+whole fleet at once, with no commit here and no change in any caller:
+
+```
+gh variable set CARE_REVIEW_MODEL --org care-ecosystem --body claude-sonnet-5
+```
+
+A single repo can override it by passing `model:` in its caller, which is the cheap way to run
+one noisy repo on a stronger model without touching the rest.
+
+Current options, cheapest first: `claude-haiku-4-5`, `claude-sonnet-5`, `claude-opus-5`.
 
 ## Cost
 
-Public repos get free Actions minutes, so the cost is tokens. On `claude-sonnet-5` a typical
-plugin PR runs roughly $0.20–0.40. That stays small for a pilot and does not stay small across
-40 repos — size it before fanning out. The levers are `max_diff_lines`, `--max-turns`, the
-`concurrency` cancel, and the draft/bot filters.
+Public repos get free Actions minutes, and with `CLAUDE_CODE_OAUTH_TOKEN` the model usage goes
+against the **subscription**, not API billing — so there is no per-review dollar figure. The
+scarce resource is the token owner's rate limit.
+
+That changes what the model choice is for. Picking `claude-haiku-4-5` over `claude-sonnet-5`
+does not save money here; it stretches the rate limit further and leaves more headroom for the
+token owner's own Claude Code. Start on Haiku, and move up only if the reviews are visibly
+missing things.
+
+If this later switches to an API key, per-token billing applies and the dollar figures matter
+again: roughly $0.20–0.40 per plugin PR on Sonnet 5, less on Haiku.
+
+Either way the volume levers are the same: `max_diff_lines`, `--max-turns`, the `concurrency`
+cancel, and the draft/bot filters.
