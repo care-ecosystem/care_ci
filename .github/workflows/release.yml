@@ -58,7 +58,10 @@ jobs:
           git push origin "v$VERSION"
 
           if [ "$PRERELEASE" = "true" ]; then
-            git tag -f beta "v$VERSION"
+            # Point beta at the COMMIT, not at the annotated tag object. `git tag -f beta
+            # "v$VERSION"` makes beta a tag-of-a-tag, which most tooling peels but some does
+            # not — and a moving ref the whole fleet resolves is the wrong place to find out.
+            git tag -f beta "$GITHUB_SHA"
             git push -f origin beta
           fi
 
