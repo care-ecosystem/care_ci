@@ -37,6 +37,14 @@ on:
         required: false
         type: string
         default: ''
+      reports_ref:
+        description: >-
+          Branch in the rules repo that reports are appended to. Deliberately NOT the branch
+          the rules live on: the reports token can write, so protect the rules branches and
+          let that token reach only this one.
+        required: false
+        type: string
+        default: reports
       rules_ref:
         description: >-
           Which ref of the rules repo to read. Defaults to `dev` during the pilot, because
@@ -50,6 +58,9 @@ on:
         required: true
       CARE_REVIEWER_TOKEN:
         required: true
+      CARE_REPORTS_TOKEN:
+        description: Write-scoped PAT for the reports branch. Omit it and reporting is skipped.
+        required: false
 
 jobs:
   review:
@@ -187,6 +198,53 @@ jobs:
               REVIEW.md specifies, and keep it short.
             - Remember proportionality: if the diff is genuinely fine, call the tool zero times
               and say so in one line.
+
+      # Reporting is best-effort: no token, no report, and never a failed review.
+      - name: Report
+        if: steps.rules.outputs.ok == 'true' && steps.size.outputs.too_big != 'true'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPORTS_TOKEN: ${{ secrets.CARE_REPORTS_TOKEN }}
+          RULES_REPO: ${{ steps.src.outputs.repo }}
+          BRANCH: ${{ inputs.reports_ref }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          LAYER: ${{ inputs.layer }}
+          CHANGED: ${{ steps.size.outputs.changed }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          # The secrets context is not available in `if:`, so the guard lives here.
+          if [ -z "$REPORTS_TOKEN" ]; then
+            echo "::notice::CARE_REPORTS_TOKEN not set; skipping the review report."
+            exit 0
+          fi
+          DEST=$(python3 .care-rules/scripts/build_report.py) || exit 0
+          REMOTE="https://x-access-token:${REPORTS_TOKEN}@github.com/${RULES_REPO}.git"
+          if ! git clone -q --depth 1 --branch "$BRANCH" "$REMOTE" _reports 2>/dev/null; then
+            git clone -q --depth 1 "$REMOTE" _reports
+            git -C _reports checkout -q --orphan "$BRANCH"
+            git -C _reports rm -rqf . 2>/dev/null || true
+          fi
+          mkdir -p "_reports/$(dirname "$DEST")"
+          cp _report/body.md "_reports/$DEST"
+          cd _reports
+          git config user.name  'care-ci[bot]'
+          git config user.email 'care-ci@users.noreply.github.com'
+          git add -- "$DEST"
+          git commit -qm "report: ${REPO}#${PR}" || exit 0
+          # Repos are reviewed concurrently; rebase and retry rather than lose the report.
+          for _ in 1 2 3 4 5; do
+            if git push -q origin "HEAD:$BRANCH" 2>/dev/null; then
+              echo "::notice::Report published to the ${BRANCH} branch."
+              exit 0
+            fi
+            git fetch -q origin "$BRANCH" 2>/dev/null || break
+            git rebase -q "origin/$BRANCH" || break
+            sleep $(( (RANDOM % 5) + 2 ))
+          done
+          echo "::warning::Could not publish the review report."
 
       - name: Note skipped review
         if: steps.size.outputs.too_big == 'true'
