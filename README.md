@@ -24,6 +24,8 @@ secrets.
 
 ## Onboarding a repo
 
+Full runbook, including the failure modes: `care_reviewer/ONBOARDING.md`. Short version:
+
 1. Copy `templates/claude-review.yml` to `.github/workflows/claude-review.yml` and set `layer:`
    to `backend` or `frontend`.
 2. Add a `CLAUDE.md` at the repo root, from `care_reviewer/templates/`. Follow
