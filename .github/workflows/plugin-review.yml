@@ -200,6 +200,8 @@ jobs:
               and say so in one line.
 
       # Reporting is best-effort: no token, no report, and never a failed review.
+      # Reporting is best-effort: no token, no report, and never a failed review.
+      # Runs under `bash -e`, so every fallible command carries its own guard.
       - name: Report
         if: steps.rules.outputs.ok == 'true' && steps.size.outputs.too_big != 'true'
         continue-on-error: true
@@ -215,36 +217,58 @@ jobs:
           CHANGED: ${{ steps.size.outputs.changed }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
-          # The secrets context is not available in `if:`, so the guard lives here.
+          # The secrets context is unavailable in `if:`, so the guard lives here.
           if [ -z "$REPORTS_TOKEN" ]; then
             echo "::notice::CARE_REPORTS_TOKEN not set; skipping the review report."
             exit 0
           fi
-          DEST=$(python3 .care-rules/scripts/build_report.py) || exit 0
+
+          DEST=$(python3 .care-rules/scripts/build_report.py) || {
+            echo "::warning::Could not build the review report."; exit 0; }
+
           REMOTE="https://x-access-token:${REPORTS_TOKEN}@github.com/${RULES_REPO}.git"
-          if ! git clone -q --depth 1 --branch "$BRANCH" "$REMOTE" _reports 2>/dev/null; then
-            git clone -q --depth 1 "$REMOTE" _reports
-            git -C _reports checkout -q --orphan "$BRANCH"
+
+          # Distinguish the two failure modes explicitly: a token that cannot READ the rules
+          # repo and one that can read but not WRITE produce the same opaque 403 otherwise.
+          if ! git ls-remote "$REMOTE" >/dev/null 2>&1; then
+            echo "::warning::CARE_REPORTS_TOKEN cannot read ${RULES_REPO}. Check that the \
+          fine-grained PAT names the ORGANISATION as its resource owner, lists that repository, \
+          grants Contents: Read and write, and has been approved if the org requires approval."
+            exit 0
+          fi
+
+          if git clone -q --depth 1 --branch "$BRANCH" "$REMOTE" _reports 2>/dev/null; then
+            :
+          else
+            git clone -q --depth 1 "$REMOTE" _reports 2>/dev/null || {
+              echo "::warning::Could not clone ${RULES_REPO}."; exit 0; }
+            git -C _reports checkout -q --orphan "$BRANCH" || { echo "::warning::orphan failed"; exit 0; }
             git -C _reports rm -rqf . 2>/dev/null || true
           fi
+
           mkdir -p "_reports/$(dirname "$DEST")"
           cp _report/body.md "_reports/$DEST"
           cd _reports
           git config user.name  'care-ci[bot]'
           git config user.email 'care-ci@users.noreply.github.com'
           git add -- "$DEST"
-          git commit -qm "report: ${REPO}#${PR}" || exit 0
+          git commit -qm "report: ${REPO}#${PR}" || { echo "::notice::Nothing to report."; exit 0; }
+
           # Repos are reviewed concurrently; rebase and retry rather than lose the report.
           for _ in 1 2 3 4 5; do
-            if git push -q origin "HEAD:$BRANCH" 2>/dev/null; then
-              echo "::notice::Report published to the ${BRANCH} branch."
-              exit 0
-            fi
+            PUSH_ERR=$(git push origin "HEAD:$BRANCH" 2>&1) && {
+              echo "::notice::Report published to ${BRANCH}: ${DEST}"; exit 0; }
+            case "$PUSH_ERR" in
+              *"not granted"*|*403*)
+                echo "::warning::CARE_REPORTS_TOKEN can read ${RULES_REPO} but cannot write to \
+          it. Set Contents: Read and write on the fine-grained PAT."
+                exit 0 ;;
+            esac
             git fetch -q origin "$BRANCH" 2>/dev/null || break
-            git rebase -q "origin/$BRANCH" || break
+            git rebase -q "origin/$BRANCH" 2>/dev/null || break
             sleep $(( (RANDOM % 5) + 2 ))
           done
-          echo "::warning::Could not publish the review report."
+          echo "::warning::Could not publish the review report: ${PUSH_ERR}"
 
       - name: Note skipped review
         if: steps.size.outputs.too_big == 'true'
