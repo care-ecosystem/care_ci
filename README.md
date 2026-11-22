@@ -58,8 +58,13 @@ Full runbook, including the failure modes: `care_reviewer/ONBOARDING.md`. Short 
   docs recommend a Console API key instead for a secret shared across repositories. Fine for a
   pilot, worth revisiting before the full fleet. Swapping to an API key later is a two-line
   change: `anthropic_api_key` in place of `claude_code_oauth_token`.
-- `CARE_REVIEWER_TOKEN` — a fine-grained PAT with `Contents: Read` on `care_reviewer` and
-  nothing else. It expires; an expired token turns every review run red.
+- `CARE_REVIEWER_TOKEN` — a fine-grained PAT with `Contents: Read` on the rules repo and
+  nothing else. It expires; set a reminder. An expired token no longer reds the run — the
+  checkout is `continue-on-error` and the review skips with an annotation — but it does mean
+  no reviews until it is replaced.
+- Org Actions **variable** `CARE_RULES_REPO` = the `owner/repo` of the rules repo. Kept in a
+  variable rather than in this file because this repo is public. Note that Actions variables
+  are not masked in logs, so the workflow deliberately never echoes its value.
 
 ## Releases
 
@@ -98,9 +103,13 @@ Re-running the release on an existing version fails rather than overwriting the 
 | Once betas are cut | `beta` | one moving ref the fleet follows, releases are deliberate |
 | Stable | `v1` | a workflow change becomes an explicit rollout |
 
-Note the rules are a separate axis: `rules_ref` selects which ref of `care_reviewer` supplies
-them, defaulting to `dev` while `care_reviewer`'s `main` is still empty. Rules deliberately are
-not version-pinned — a rule fix should reach the fleet without a release.
+Note the rules are a separate axis: `rules_repo` and `rules_ref` select where they come from,
+defaulting to the `CARE_RULES_REPO` variable at `dev` while the rules repo's `main` is still
+empty. Rules deliberately are not version-pinned — a rule fix should reach the fleet without a
+release.
+
+The caller's `uses:` line cannot be made a variable: GitHub does not allow expressions in
+`jobs.<job_id>.uses`, so this repo's own path stays literal in every caller.
 
 ## Inputs
 
@@ -109,7 +118,8 @@ not version-pinned — a rule fix should reach the fleet without a release.
 | `layer` | *(required)* | `backend` or `frontend` — selects the rule file |
 | `max_diff_lines` | `2000` | skip above this many changed lines |
 | `model` | org variable, else `claude-haiku-4-5` | see below |
-| `rules_ref` | `dev` | which ref of `care_reviewer` supplies the rules |
+| `rules_repo` | org variable `CARE_RULES_REPO` | `owner/repo` holding the review rules |
+| `rules_ref` | `dev` | which ref of the rules repo to read |
 
 ### Changing the model
 

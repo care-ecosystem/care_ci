@@ -2,9 +2,9 @@ name: CARE Plugin Review
 
 # Reusable reviewer for the CARE plugin fleet.
 #
-# Mechanism lives here (public, so public callers can reference it); judgment lives in the
-# private care-ecosystem/care_reviewer, checked out at run time. A rule change is a commit
-# there and needs no tag move here.
+# Mechanism lives here (public, so public callers can reference it); judgment lives in a
+# private rules repo named by the org variable CARE_RULES_REPO and checked out at run time.
+# A rule change is a commit there and needs no tag move here.
 #
 # Advisory by design: this workflow must never block a merge. See `continue-on-error` below.
 
@@ -28,11 +28,20 @@ on:
         required: false
         type: string
         default: ''
+      rules_repo:
+        description: >-
+          owner/repo holding the review rules. Defaults to the org variable CARE_RULES_REPO,
+          resolved at run time rather than here — a workflow_call input default cannot read
+          the vars context, and this repo is public, so the private rules repo should not be
+          named in it.
+        required: false
+        type: string
+        default: ''
       rules_ref:
         description: >-
-          Which ref of care_reviewer to take the rules from. Defaults to `dev` during the
-          pilot, because that is where the rules currently live; care_reviewer's own default
-          branch is still empty. Flip this default to `main` once the rules are merged there.
+          Which ref of the rules repo to read. Defaults to `dev` during the pilot, because
+          that is where the rules currently live and the rules repo's own default branch is
+          still empty. Flip this default to `main` once the rules are merged there.
         required: false
         type: string
         default: dev
@@ -66,10 +75,28 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Resolve the rules source
+        id: src
+        env:
+          FROM_INPUT: ${{ inputs.rules_repo }}
+          FROM_VAR: ${{ vars.CARE_RULES_REPO }}
+        run: |
+          # Not echoed: Actions variables are not masked, and these logs are public.
+          REPO="${FROM_INPUT:-$FROM_VAR}"
+          if [ -z "$REPO" ]; then
+            echo "::error::No rules repo. Set the org Actions variable CARE_RULES_REPO (owner/repo), or pass rules_repo:."
+          fi
+          echo "repo=$REPO" >> "$GITHUB_OUTPUT"
+
+      # continue-on-error so an expired CARE_REVIEWER_TOKEN, or an unset CARE_RULES_REPO,
+      # annotates and skips instead of turning the PR's checks red. The guard below then
+      # finds no rules and skips the review, leaving the job green.
       - name: Check out the review rules
+        if: steps.src.outputs.repo != ''
+        continue-on-error: true
         uses: actions/checkout@v6
         with:
-          repository: care-ecosystem/care_reviewer
+          repository: ${{ steps.src.outputs.repo }}
           ref: ${{ inputs.rules_ref }}
           path: .care-rules
           token: ${{ secrets.CARE_REVIEWER_TOKEN }}
@@ -86,10 +113,10 @@ jobs:
           done
           if [ -n "$MISSING" ]; then
             echo "ok=false" >> "$GITHUB_OUTPUT"
-            echo "::error::No review possible: missing or empty on care_reviewer@${{ inputs.rules_ref }}:$MISSING"
+            echo "::error::No review possible: missing or empty on the rules repo at ref '${{ inputs.rules_ref }}':$MISSING"
           else
             echo "ok=true" >> "$GITHUB_OUTPUT"
-            echo "::notice::Rules loaded from care_reviewer@${{ inputs.rules_ref }}."
+            echo "::notice::Rules loaded at ref '${{ inputs.rules_ref }}'."
           fi
 
       - name: Size gate
