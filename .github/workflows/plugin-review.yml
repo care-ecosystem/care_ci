@@ -148,6 +148,11 @@ jobs:
             echo "::notice::Reviewing $CHANGED changed lines."
           fi
 
+      - name: Mark the review start
+        id: t0
+        if: steps.rules.outputs.ok == 'true' && steps.size.outputs.too_big != 'true'
+        run: echo "at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+
       - name: Review
         if: steps.rules.outputs.ok == 'true' && steps.size.outputs.too_big != 'true'
         # Advisory: a failed or errored review must never turn the PR's checks red.
@@ -216,6 +221,7 @@ jobs:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           LAYER: ${{ inputs.layer }}
           CHANGED: ${{ steps.size.outputs.changed }}
+          REVIEW_STARTED_AT: ${{ steps.t0.outputs.at }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           # The secrets context is unavailable in `if:`, so the guard lives here.
