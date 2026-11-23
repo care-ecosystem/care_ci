@@ -234,30 +234,37 @@ jobs:
             exit 0
           fi
 
+          # Work outside the checked-out repo. actions/checkout writes a local
+          # http.https://github.com/.extraheader carrying GITHUB_TOKEN, which overrides the
+          # credentials in any URL used from inside the working tree — so a PAT embedded in
+          # the remote URL is silently ignored and github.com sees GITHUB_TOKEN instead.
+          # That token is scoped to this repository, so it 403s on the rules repo.
+          WORK="${RUNNER_TEMP}/care-report"
+          rm -rf "$WORK"; mkdir -p "$WORK"
+          cp "$GITHUB_WORKSPACE/_report/body.md" "$WORK/body.md"
+          cd "$WORK"
+
           REMOTE="https://x-access-token:${REPORTS_TOKEN}@github.com/${RULES_REPO}.git"
 
-          # Distinguish the two failure modes explicitly: a token that cannot READ the rules
-          # repo and one that can read but not WRITE produce the same opaque 403 otherwise.
           if ! git ls-remote "$REMOTE" >/dev/null 2>&1; then
-            echo "::warning::CARE_REPORTS_TOKEN cannot read ${RULES_REPO} — the report is \
-          attached to this run as an artifact instead. If this is unexpected, the usual cause \
-          is a fine-grained PAT awaiting organisation approval: the token page shows the \
-          intended repository list while the grant still lags behind."
+            echo "::warning::CARE_REPORTS_TOKEN cannot read the rules repo — the report is \
+          attached to this run as an artifact instead. Run the 'Check reports token' workflow \
+          in care_ci to see whether it is a read, a write or an approval problem."
             exit 0
           fi
 
-          if git clone -q --depth 1 --branch "$BRANCH" "$REMOTE" _reports 2>/dev/null; then
+          if git clone -q --depth 1 --branch "$BRANCH" "$REMOTE" repo 2>/dev/null; then
             :
           else
-            git clone -q --depth 1 "$REMOTE" _reports 2>/dev/null || {
-              echo "::warning::Could not clone ${RULES_REPO}."; exit 0; }
-            git -C _reports checkout -q --orphan "$BRANCH" || { echo "::warning::orphan failed"; exit 0; }
-            git -C _reports rm -rqf . 2>/dev/null || true
+            git clone -q --depth 1 "$REMOTE" repo 2>/dev/null || {
+              echo "::warning::Could not clone the rules repo."; exit 0; }
+            git -C repo checkout -q --orphan "$BRANCH" || { echo "::warning::orphan failed"; exit 0; }
+            git -C repo rm -rqf . 2>/dev/null || true
           fi
 
-          mkdir -p "_reports/$(dirname "$DEST")"
-          cp _report/body.md "_reports/$DEST"
-          cd _reports
+          mkdir -p "repo/$(dirname "$DEST")"
+          cp body.md "repo/$DEST"
+          cd repo
           git config user.name  'care-ci[bot]'
           git config user.email 'care-ci@users.noreply.github.com'
           git add -- "$DEST"
@@ -269,8 +276,8 @@ jobs:
               echo "::notice::Report published to ${BRANCH}: ${DEST}"; exit 0; }
             case "$PUSH_ERR" in
               *"not granted"*|*403*)
-                echo "::warning::CARE_REPORTS_TOKEN can read ${RULES_REPO} but cannot write to \
-          it. Set Contents: Read and write on the fine-grained PAT."
+                echo "::warning::CARE_REPORTS_TOKEN can read the rules repo but cannot write \
+          to it. Set Contents: Read and write on the fine-grained PAT."
                 exit 0 ;;
             esac
             git fetch -q origin "$BRANCH" 2>/dev/null || break
