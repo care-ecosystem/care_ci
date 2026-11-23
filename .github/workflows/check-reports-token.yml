@@ -1,0 +1,80 @@
+name: Check reports token
+
+# A ten-second check that CARE_REPORTS_TOKEN can actually read and write the rules repo,
+# without spending a review. Run it from the Actions tab, or:
+#
+#   gh workflow run check-reports-token.yml --repo care-ecosystem/care_ci
+#
+# Worth re-running whenever the token is renewed — it expires, and the failure mode
+# otherwise is silent: reviews keep working and reports just stop arriving.
+#
+# This workflow lives on main because workflow_dispatch only runs from the default branch.
+
+on:
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Probe the token
+        env:
+          TOKEN: ${{ secrets.CARE_REPORTS_TOKEN }}
+          RULES_REPO: ${{ vars.CARE_RULES_REPO }}
+        run: |
+          FAIL=0
+
+          if [ -z "$RULES_REPO" ]; then
+            echo "::error::Org variable CARE_RULES_REPO is not set."
+            exit 1
+          fi
+          if [ -z "$TOKEN" ]; then
+            echo "::error::CARE_REPORTS_TOKEN is empty here. Either the secret does not exist, \
+          or this repository is not in its selected-repositories list."
+            exit 1
+          fi
+
+          # A trailing newline in the stored secret is a real and silent failure cause.
+          case "$TOKEN" in
+            *" "*|*"$(printf '\n')"*) echo "::warning::The stored token contains whitespace." ;;
+          esac
+
+          REMOTE="https://x-access-token:${TOKEN}@github.com/${RULES_REPO}.git"
+
+          if git ls-remote "$REMOTE" >/dev/null 2>&1; then
+            echo "READ  ok"
+          else
+            echo "::error::READ failed. The token cannot see ${RULES_REPO}. Check that the \
+          fine-grained PAT names the organisation as its resource owner, lists that repository, \
+          that the org allows fine-grained PATs at all (Settings -> Third-party Access), and \
+          that any approval request has been granted."
+            FAIL=1
+          fi
+
+          if [ "$FAIL" = "0" ]; then
+            # Push an empty commit to a throwaway ref, then delete it. Proves write without
+            # touching any branch anyone reads.
+            TMP="refs/heads/_token-check-${GITHUB_RUN_ID}"
+            rm -rf _probe
+            git clone -q --depth 1 "$REMOTE" _probe
+            cd _probe
+            git config user.name  'care-ci[bot]'
+            git config user.email 'care-ci@users.noreply.github.com'
+            git commit -q --allow-empty -m "token check"
+            if git push -q origin "HEAD:$TMP" 2>/dev/null; then
+              echo "WRITE ok"
+              git push -q origin --delete "$TMP" 2>/dev/null || \
+                echo "::warning::Could not delete the probe ref ${TMP}; remove it by hand."
+            else
+              echo "::error::WRITE failed. The token can read ${RULES_REPO} but not write to \
+          it. Set Contents: Read and write on the fine-grained PAT."
+              FAIL=1
+            fi
+            cd ..
+          fi
+
+          if [ "$FAIL" = "0" ]; then
+            echo "::notice::CARE_REPORTS_TOKEN is good: reports will publish to ${RULES_REPO}."
+          fi
+          exit "$FAIL"
