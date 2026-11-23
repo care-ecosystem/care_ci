@@ -35,10 +35,13 @@ jobs:
             exit 1
           fi
 
-          # A trailing newline in the stored secret is a real and silent failure cause.
-          case "$TOKEN" in
-            *" "*|*"$(printf '\n')"*) echo "::warning::The stored token contains whitespace." ;;
-          esac
+          # A trailing newline or space in the stored secret is a real and silent failure
+          # cause. Compare against the token with whitespace stripped rather than pattern
+          # matching on a newline, which a command substitution would swallow.
+          if [ "$TOKEN" != "$(printf '%s' "$TOKEN" | tr -d '[:space:]')" ]; then
+            echo "::warning::The stored token contains whitespace; re-upload it with \
+          printf '%s' rather than echo."
+          fi
 
           REMOTE="https://x-access-token:${TOKEN}@github.com/${RULES_REPO}.git"
 
